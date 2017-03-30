@@ -57,7 +57,6 @@
  *         yscreen = 127-y/128
  * and draws a solid circle whose color depends on whether the joystick button is pressed.
  **************************************************************************************/
-
 // Full set of include files including graphics and driver libraries
 // and also the LCD driver which is part of the project itself
 #include <ti/devices/msp432p4xx/inc/msp.h>
@@ -69,47 +68,10 @@
 /********************************************
  * Global Variables shared between handlers
  ********************************************/
-#define PERIOD 100
-#define DUTY_CYCLE_STEP 10
-#define INITIAL_DUTY_CYCLE 10
-#define AUDIO_COUNT 50
 
-/* Volume and Pitch Adjustments */
-uint16_t volume_period = 16;
-uint16_t pitch_period = 12;
-uint16_t set_volume_period = 16;
-uint16_t set_pitch_period = 12;
-
-
-/* ADC results buffer */
 uint16_t resultsBuffer[2];           // latest readings from the analog inputs
-uint16_t setBuffer[2];
 uint16_t buttonPressed;              // 1 if joystick button is pressed
-volatile uint16_t print_flag;                 // flag to signal main to redisplay - set by ADC14
-
-
-// Variables for refresh of display
-unsigned dotcolor;          // color of the dot to display
-uint16_t xdisplay,ydisplay; // screen coordinates to disolay
-
-// Color parameters for drawing on the screen - see grlib.h
-#define TEXTCOL GRAPHICS_COLOR_YELLOW
-#define BACKCOL GRAPHICS_COLOR_BLACK
-#define DOTCOL GRAPHICS_COLOR_LIGHT_GREEN
-#define DOTCOL_PRESSED GRAPHICS_COLOR_RED
-#define RADIUS 2
-
-// Graphics Globals (used by put_dot and ADC14 handler)
-
-Graphics_Context g_sContext;    // graphics context for grlib
-uint16_t xscreen, yscreen;      // current screen location coordinates
-
-
-void put_dot(uint16_t x,uint16_t y, uint32_t dotcolor);
-
-// text printout of joystick readings on the screen
-uint16_t vol_and_pitch[2];
-void print_current_results(uint16_t *results);
+uint16_t print_flag;                 // flag to signal main to redisplay - set by ADC14
 
 /***************************************************************
  * WDT system
@@ -195,7 +157,6 @@ void init_ADC(){
      */
     MAP_ADC14_enableInterrupt(ADC_INT1);
 
-
     /* Setting up the sample timer to automatically step through the sequence
      * convert.
      */
@@ -207,89 +168,22 @@ void init_ADC(){
 
 }
 
-// TA0CCR0 Interrupt Handler
-
-// Variables used for time related activities by the handler
-
-volatile unsigned int counter; // down counter for toggling pwm output mode
-//volatile unsigned int ad_counter = 2048;
-//volatile unsigned int change_counter = 0;
-
-void TA0_0_Handler(){
-
-    volume_period = (resultsBuffer[0] >> 9) + 1;
-    pitch_period = (resultsBuffer[1] >> 10) + 4;
-
-    if(buttonPressed){
-        set_volume_period = volume_period;
-        set_pitch_period = pitch_period;
-        setBuffer[0] = resultsBuffer[0];
-        setBuffer[1] = resultsBuffer[1];
-    }
-
-    MAP_Timer_A_clearCaptureCompareInterrupt(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_0);
-
-    if(buttonPressed)
-        MAP_Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_4, volume_period);
-    else MAP_Timer_A_setCompareValue(TIMER_A0_BASE,TIMER_A_CAPTURECOMPARE_REGISTER_4, set_volume_period);
-
-    if (--counter == 0){
-        TIMER_A0->CCTL[4]^=TIMER_A_CCTLN_OUTMOD_7; // toggle between mode 0 and mode 7 reset/set
-        if(buttonPressed)
-            counter=pitch_period;
-        else counter=set_pitch_period;
-
-
-    }
-
-
-
-}
-
-
-/* Timer_A UpMode Configuration Parameter */
-const Timer_A_UpModeConfig upConfig =
-{
-        TIMER_A_CLOCKSOURCE_SMCLK,              // SMCLK Clock Source
-        TIMER_A_CLOCKSOURCE_DIVIDER_10,          // 10MHz
-        PERIOD-1,                               //
-        TIMER_A_TAIE_INTERRUPT_DISABLE,         // Disable Timer interrupt
-        TIMER_A_CCIE_CCR0_INTERRUPT_DISABLE ,   // Disable CCR0 interrupt
-        TIMER_A_DO_CLEAR                        // Clear value
-};
-const Timer_A_CompareModeConfig ccr0_Config ={
-        TIMER_A_CAPTURECOMPARE_REGISTER_0,
-        TIMER_A_CAPTURECOMPARE_INTERRUPT_ENABLE,
-        TIMER_A_OUTPUTMODE_OUTBITVALUE,
-        PERIOD-1
-};
-
-const Timer_A_CompareModeConfig ccr4_Config ={
-        TIMER_A_CAPTURECOMPARE_REGISTER_4,
-        TIMER_A_CAPTURECOMPARE_INTERRUPT_DISABLE,
-        TIMER_A_OUTPUTMODE_RESET_SET,
-        INITIAL_DUTY_CYCLE
-};
-
-void init_timer(){              // initialization and start of timer
-    /* Configuring Timer_A1 for Up Mode */
-    MAP_Timer_A_configureUpMode(TIMER_A0_BASE, &upConfig);
-
-    // configure channels
-    MAP_Timer_A_initCompare(TIMER_A0_BASE, &ccr0_Config);
-    MAP_Timer_A_initCompare(TIMER_A0_BASE, &ccr4_Config);
-
-    counter=AUDIO_COUNT;
-
-    MAP_Timer_A_registerInterrupt(TIMER_A0_BASE,TIMER_A_CCR0_INTERRUPT,TA0_0_Handler);
-
-    GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_P2,GPIO_PIN7,GPIO_PRIMARY_MODULE_FUNCTION);
-    MAP_Timer_A_startCounter(TIMER_A0_BASE, TIMER_A_UP_MODE); // start TA0 in up mode
-}
-
 /********************************************************
  * DISPLAY Section
  ********************************************************/
+
+// Color parameters for drawing on the screen - see grlib.h
+#define TEXTCOL GRAPHICS_COLOR_YELLOW
+#define BACKCOL GRAPHICS_COLOR_BLACK
+#define DOTCOL GRAPHICS_COLOR_LIGHT_GREEN
+#define DOTCOL_PRESSED GRAPHICS_COLOR_RED
+#define RADIUS 2
+
+// Graphics Globals (used by put_dot and ADC14 handler)
+
+Graphics_Context g_sContext;    // graphics context for grlib
+uint16_t xscreen, yscreen;      // current screen location coordinates
+
 
 // Draw a dot (small circle) on the screen at position x,y of color dotcolor
 // also ERASE previous dot (remembered in globals xscreen, yscreen)
@@ -309,31 +203,13 @@ void print_current_results(uint16_t *results){
     char string[8];
 
     Graphics_setForegroundColor(&g_sContext, TEXTCOL);
-
-    sprintf(string, "v: %5d", results[0]);
-    Graphics_drawString(&g_sContext,
-                                    (int8_t *)string,
-                                    8,
-                                    20,
-                                    116,
-                                    OPAQUE_TEXT);
-
-    sprintf(string, "p: %5d", results[1]);
-    Graphics_drawString(&g_sContext,
-                                    (int8_t *)string,
-                                    8,
-                                    76,
-                                    116,
-                                    OPAQUE_TEXT);
+    sprintf(string, "X: %5d", results[0]);
+    Graphics_drawString(&g_sContext,(int8_t *)string,8,20,116,OPAQUE_TEXT);
+    sprintf(string, "Y: %5d", results[1]);
+    Graphics_drawString(&g_sContext,(int8_t *)string,8,76,116,OPAQUE_TEXT);
 }
 
-
-
 void init_display(){
-	/*
-	 * All init code for the display
-	 *
-	 */
     /* Initializes display */
     Crystalfontz128x128_Init();
 
@@ -346,20 +222,10 @@ void init_display(){
     Graphics_setBackgroundColor(&g_sContext, BACKCOL);
     GrContextFontSet(&g_sContext, &g_sFontFixed6x8);
     Graphics_clearDisplay(&g_sContext);
-    Graphics_drawString(&g_sContext,
-                                    "J:",
-                                    AUTO_STRING_LENGTH,
-                                    0,
-                                    116,
-                                    OPAQUE_TEXT);
+    Graphics_drawString(&g_sContext,"J:",AUTO_STRING_LENGTH,0,116,OPAQUE_TEXT);
     xscreen=0;
     yscreen=0;  // just use origin, first write is a background
-    setBuffer[0] = 8000;
-    setBuffer[1] = 8000;
 }
-
-
-
 
 
 /**********************************
@@ -367,13 +233,15 @@ void init_display(){
  **********************************/
 
 void main(void)
-    {
-
+{
+    // Variables for refresh of display
+    unsigned dotcolor;          // color of the dot to display
+    uint16_t xdisplay,ydisplay; // screen coordinates to disolay
 
     /* Halting WDT and disabling master interrupts */
-	MAP_CS_setDCOFrequency(10000000); // 10 MHz
+    MAP_CS_setDCOFrequency(10000000); // 10 MHz
 
-	 init_WDT();
+    init_WDT();
 
     init_display(); // setup the display
     print_flag=0;   //clear print flag until there is a result
@@ -386,32 +254,21 @@ void main(void)
     MAP_Interrupt_enableInterrupt(INT_ADC14);
     MAP_Interrupt_enableInterrupt(INT_WDT_A);
 
-    init_timer();
 
     while(1)
     {
-//        MAP_PCM_gotoLPM0();
+        MAP_PCM_gotoLPM0();
         __no_operation(); //  For debugger
-        if (print_flag){
+        if (print_flag)
+        {
             print_flag=0;
             dotcolor=buttonPressed ? DOTCOL_PRESSED: DOTCOL;
+            xdisplay=resultsBuffer[0]/128;
+            ydisplay=127-resultsBuffer[1]/128;
 
-            if(buttonPressed){
-                vol_and_pitch[0] = volume_period;
-                vol_and_pitch[1] = pitch_period;
-                xdisplay=resultsBuffer[0]/128;
-                ydisplay=127-resultsBuffer[1]/128;
-            }else{
-                vol_and_pitch[0] = set_volume_period;
-                vol_and_pitch[1] = set_pitch_period;
-                xdisplay=setBuffer[0]/128;
-                ydisplay=127-setBuffer[1]/128;
-            }
-
-            print_current_results(vol_and_pitch);
+            print_current_results(resultsBuffer);
             put_dot(xdisplay,ydisplay,dotcolor);
 
         }
     }
 }
-
