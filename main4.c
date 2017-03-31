@@ -321,8 +321,10 @@ void main(void)
 
 
     /* Selecting P3.2 and P3.3 in UART mode */
-   MAP_GPIO_setAsPeripheralModuleFunctionInputPin(GPIO_PORT_P3,
+   MAP_GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_P3,
                 GPIO_PIN2 | GPIO_PIN3, GPIO_PRIMARY_MODULE_FUNCTION);
+//   MAP_GPIO_setAsPeripheralModuleFunctionOutputPin(GPIO_PORT_P3,
+//               GPIO_PIN3, GPIO_PRIMARY_MODULE_FUNCTION);
 
     init_WDT();
 
@@ -342,15 +344,15 @@ void main(void)
 
 
 /* Configuring UART Module */
-    MAP_UART_initModule(EUSCI_A2_BASE, &uartConfig);
+    MAP_UART_initModule(EUSCI_A0_BASE, &uartConfig);
 
     /* Enable UART module */
-    MAP_UART_enableModule(EUSCI_A2_BASE);
+    MAP_UART_enableModule(EUSCI_A0_BASE);
 
     /* Enabling interrupts */
-    MAP_UART_enableInterrupt(EUSCI_A2_BASE, EUSCI_A_UART_RECEIVE_INTERRUPT);
-    MAP_UART_enableInterrupt(EUSCI_A2_BASE, EUSCI_A_UART_TRANSMIT_INTERRUPT);
-    MAP_Interrupt_enableInterrupt(INT_EUSCIA2);
+    MAP_UART_enableInterrupt(EUSCI_A0_BASE, EUSCI_A_UART_RECEIVE_INTERRUPT);
+//    MAP_UART_enableInterrupt(EUSCI_A0_BASE, EUSCI_A_UART_TRANSMIT_INTERRUPT);
+    MAP_Interrupt_enableInterrupt(INT_EUSCIA0);
     MAP_Interrupt_enableMaster();
 
 
@@ -368,8 +370,8 @@ void main(void)
 //            print_current_results(resultsBuffer);
 
             if(print_flag){
-                uint8_t data =  resultsBuffer[0] >> 7;
-                MAP_UART_transmitData(EUSCI_A2_BASE, data);
+                uint8_t data = resultsBuffer[0] >> 7;
+                MAP_UART_transmitData(EUSCI_A0_BASE, data);
                 needsTransmit = 1;
             }
             uint16_t tempBuffer[2];
@@ -387,26 +389,26 @@ void main(void)
 }
 
 
-/* EUSCI A2 UART ISR - Echoes data back to PC host */
-void EUSCIA2_IRQHandler(void)
+/* EUSCI A0 UART ISR - Echoes data back to PC host */
+void EUSCIA0_IRQHandler(void)
 {
-    uint32_t status = MAP_UART_getEnabledInterruptStatus(EUSCI_A2_BASE);
+    uint32_t status = MAP_UART_getEnabledInterruptStatus(EUSCI_A0_BASE);
 
     if(status & EUSCI_A_UART_RECEIVE_INTERRUPT_FLAG)
     {
         //MAP_UART_transmitData(EUSCI_A0_BASE, MAP_UART_receiveData(EUSCI_A0_BASE));
         switch(count){
         case 0:
-            receiveBuffer[0] = MAP_UART_receiveData(EUSCI_A2_BASE);
+            receiveBuffer[0] = MAP_UART_receiveData(EUSCI_A0_BASE);
             break;
         case 1:
-            receiveBuffer[0] += MAP_UART_receiveData(EUSCI_A2_BASE) << 8;
+            receiveBuffer[0] += MAP_UART_receiveData(EUSCI_A0_BASE) << 8;
             break;
         case 2:
-            receiveBuffer[1] = MAP_UART_receiveData(EUSCI_A2_BASE);
+            receiveBuffer[1] = MAP_UART_receiveData(EUSCI_A0_BASE);
             break;
         case 3:
-            receiveBuffer[1] += MAP_UART_receiveData(EUSCI_A2_BASE) << 8;
+            receiveBuffer[1] += MAP_UART_receiveData(EUSCI_A0_BASE) << 8;
             receive_flag = 1;
             break;
         }
@@ -415,13 +417,13 @@ void EUSCIA2_IRQHandler(void)
         if(count > 3)
             count = 0;
 
-        MAP_UART_clearInterruptFlag(EUSCI_A2_BASE, status);
+        MAP_UART_clearInterruptFlag(EUSCI_A0_BASE, status);
 
     }
 
     if((status & EUSCI_A_UART_TRANSMIT_INTERRUPT_FLAG) && needsTransmit){
         uint8_t data =  resultsBuffer[1] >> 7;
-        MAP_UART_transmitData(EUSCI_A2_BASE, data);
+        MAP_UART_transmitData(EUSCI_A0_BASE, data);
         needsTransmit = 0;
     }
 
