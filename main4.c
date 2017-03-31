@@ -134,8 +134,9 @@ uint16_t resultsBuffer[2];           // latest readings from the analog inputs
 uint16_t buttonPressed;              // 1 if joystick button is pressed
 uint16_t print_flag;                 // flag to signal main to redisplay - set by ADC14
 uint16_t receive_flag;
-uint8_t receiveBuffer[2];
+uint16_t receiveBuffer[2];
 uint16_t count;
+uint16_t needsTransmit;
 
 /***************************************************************
  * WDT system
@@ -329,6 +330,7 @@ void main(void)
     print_flag=0;   //clear print flag until there is a result
     receive_flag=0;
     count = 0;
+    needsTransmit = 0;
     init_ADC();
 
     MAP_Interrupt_disableSleepOnIsrExit();   // Specify that after an interrupt, the CPU wakes up
@@ -347,7 +349,7 @@ void main(void)
 
     /* Enabling interrupts */
     MAP_UART_enableInterrupt(EUSCI_A2_BASE, EUSCI_A_UART_RECEIVE_INTERRUPT);
-//    MAP_UART_enableInterrupt(EUSCI_A2_BASE, EUSCI_A_UART_TRANSMIT_INTERRUPT);
+    MAP_UART_enableInterrupt(EUSCI_A2_BASE, EUSCI_A_UART_TRANSMIT_INTERRUPT);
     MAP_Interrupt_enableInterrupt(INT_EUSCIA2);
     MAP_Interrupt_enableMaster();
 
@@ -366,13 +368,14 @@ void main(void)
 //            print_current_results(resultsBuffer);
 
             if(print_flag){
-                int i;
-                for(i = 0; i < 2; i++){
-                    uint8_t data =  resultsBuffer[i] >> 8;
-                    MAP_UART_transmitData(EUSCI_A0_BASE, data);
-                }
+                uint8_t data =  resultsBuffer[0] >> 7;
+                MAP_UART_transmitData(EUSCI_A2_BASE, data);
+                needsTransmit = 1;
             }
-            print_current_results(receiveBuffer);
+            uint16_t tempBuffer[2];
+            tempBuffer[0] = resultsBuffer[0] >> 7;
+            tempBuffer[1] = resultsBuffer[1] >> 7;
+            print_current_results(tempBuffer);
 
             put_dot(xdisplay,ydisplay,dotcolor);
 
@@ -414,6 +417,12 @@ void EUSCIA2_IRQHandler(void)
 
         MAP_UART_clearInterruptFlag(EUSCI_A2_BASE, status);
 
+    }
+
+    if((status & EUSCI_A_UART_TRANSMIT_INTERRUPT_FLAG) && needsTransmit){
+        uint8_t data =  resultsBuffer[1] >> 7;
+        MAP_UART_transmitData(EUSCI_A2_BASE, data);
+        needsTransmit = 0;
     }
 
 }
