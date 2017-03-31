@@ -57,6 +57,65 @@
  *         yscreen = 127-y/128
  * and draws a solid circle whose color depends on whether the joystick button is pressed.
  **************************************************************************************/
+/**************************************************************************
+ * Joystick Example Version 3 (March 2017)
+ *
+ * This is a (highly) modified version of the EDU Booster Pack
+ * Joystick example from the TI SDK.
+ *
+ * Operation:
+ * The application uses the EDU MKII Joystick and Crystalfont display
+ * The Joysick is periodically sampled (by the MSP432 ADC14).
+ * The resulting x,y values (between 0 and 2**14-1) are rescaled to 7 bits
+ * and used as x,y coordinates on the 128x128 display for drawing a small circle.
+ * As in the original Joystick example, the ADC14 readings are also written on the screen.
+ *
+ * Parameters and Details
+ * ======================
+ *
+ * Connections (from the EDU MKII):
+ * ------------------------------
+ * Joystick X analog input: P6.0 (A15) [A15 is the default tertiary function of P6.0]
+ * Joystick Y analog input: P4.4 (A9)
+ * Joystick Button input: P4.1 (not used here, yet)
+ *
+ * The Crystalfont128x128 display is connected to an SPI communication interface
+ * and several gpio pins:
+ * LCD SPI CLK:  P1.5 (UCB0CLK)
+ * LCD RST:      P5.7
+ * LCD SPI MOSI: P1.6 (UCB0SIMO)
+ * LCD SPI CS:   P5.0
+ * LCD RS PIN:   P3.7
+ *
+ * The display is managed by a Graphics Library (grlib.h) and
+ * an LCD driver for the Crystalfont128x128 display.
+ * See the graphics driver library documentation in the MSP432 SDK
+ * and the LCD driver code that is part of this project.
+ *
+ * Timing parameters
+ * -----------------
+ * The MCLK and SMLK are driven by the DCO at 10MHz (still at VCORE0 voltage levels)
+ * We use this faster than default speed mainly to be sure that graphics library
+ * has enough headroom for CPU utilization (not sure if this is necessary).
+ *
+ * The ADC14 could be run in automatic mode to take samples repeatedly (this was
+ * done in original TI example), but we choose to trigger individual readings rapidly
+ * on a human time scale but not on the CPU time scale by using the WDT with divisor 8K.
+ *
+ * Software Overview:
+ *
+ * The WDT interrupt triggers a single ADC14 sequence of channels measurement.
+ * The completion of the final ADC channel measurement triggers the ADC14 interrupt
+ * The ADC interrupt saves the joystick readings (including the button, and
+ * sets a global 'print_flag' indicating a refresh of the screen is needed.
+ *
+ * After any interrupt, the main program wakes up, checks the print flag and,
+ * if it is set, refreshes the display:
+ * It computes the screen coordinates for the analog measurements:
+ *         xscreen = x/128
+ *         yscreen = 127-y/128
+ * and draws a solid circle whose color depends on whether the joystick button is pressed.
+ **************************************************************************************/
 // Full set of include files including graphics and driver libraries
 // and also the LCD driver which is part of the project itself
 #include <ti/devices/msp432p4xx/inc/msp.h>
@@ -64,6 +123,8 @@
 #include <ti/grlib/grlib.h>
 #include "LcdDriver/Crystalfontz128x128_ST7735.h"
 #include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 /********************************************
  * Global Variables shared between handlers
@@ -72,6 +133,9 @@
 uint16_t resultsBuffer[2];           // latest readings from the analog inputs
 uint16_t buttonPressed;              // 1 if joystick button is pressed
 uint16_t print_flag;                 // flag to signal main to redisplay - set by ADC14
+uint16_t receive_flag;
+uint8_t receiveBuffer[2];
+uint16_t count;
 
 /***************************************************************
  * WDT system
@@ -228,6 +292,19 @@ void init_display(){
 }
 
 
+const eUSCI_UART_Config uartConfig =
+{
+        EUSCI_A_UART_CLOCKSOURCE_SMCLK,          // SMCLK Clock Source
+        78,                                     // BRDIV = 78
+        2,                                       // UCxBRF = 2
+        0,                                       // UCxBRS = 0
+        EUSCI_A_UART_NO_PARITY,                  // No Parity
+        EUSCI_A_UART_LSB_FIRST,                  // LSB First
+        EUSCI_A_UART_ONE_STOP_BIT,               // One stop bit
+        EUSCI_A_UART_MODE,                       // UART mode
+        EUSCI_A_UART_OVERSAMPLING_BAUDRATE_GENERATION  // Oversampling
+};
+
 /**********************************
  * Main function
  **********************************/
@@ -241,10 +318,17 @@ void main(void)
     /* Halting WDT and disabling master interrupts */
     MAP_CS_setDCOFrequency(10000000); // 10 MHz
 
+
+    /* Selecting P3.2 and P3.3 in UART mode */
+   MAP_GPIO_setAsPeripheralModuleFunctionInputPin(GPIO_PORT_P3,
+                GPIO_PIN2 | GPIO_PIN3, GPIO_PRIMARY_MODULE_FUNCTION);
+
     init_WDT();
 
     init_display(); // setup the display
     print_flag=0;   //clear print flag until there is a result
+    receive_flag=0;
+    count = 0;
     init_ADC();
 
     MAP_Interrupt_disableSleepOnIsrExit();   // Specify that after an interrupt, the CPU wakes up
@@ -255,20 +339,81 @@ void main(void)
     MAP_Interrupt_enableInterrupt(INT_WDT_A);
 
 
+/* Configuring UART Module */
+    MAP_UART_initModule(EUSCI_A2_BASE, &uartConfig);
+
+    /* Enable UART module */
+    MAP_UART_enableModule(EUSCI_A2_BASE);
+
+    /* Enabling interrupts */
+    MAP_UART_enableInterrupt(EUSCI_A2_BASE, EUSCI_A_UART_RECEIVE_INTERRUPT);
+//    MAP_UART_enableInterrupt(EUSCI_A2_BASE, EUSCI_A_UART_TRANSMIT_INTERRUPT);
+    MAP_Interrupt_enableInterrupt(INT_EUSCIA2);
+    MAP_Interrupt_enableMaster();
+
+
+
     while(1)
     {
         MAP_PCM_gotoLPM0();
         __no_operation(); //  For debugger
-        if (print_flag)
+        if (print_flag | receive_flag)
         {
-            print_flag=0;
             dotcolor=buttonPressed ? DOTCOL_PRESSED: DOTCOL;
             xdisplay=resultsBuffer[0]/128;
             ydisplay=127-resultsBuffer[1]/128;
 
-            print_current_results(resultsBuffer);
+//            print_current_results(resultsBuffer);
+
+            if(print_flag){
+                int i;
+                for(i = 0; i < 2; i++){
+                    uint8_t data =  resultsBuffer[i] >> 8;
+                    MAP_UART_transmitData(EUSCI_A0_BASE, data);
+                }
+            }
+            print_current_results(receiveBuffer);
+
             put_dot(xdisplay,ydisplay,dotcolor);
+
+            print_flag = 0;
+            receive_flag = 0;
 
         }
     }
+}
+
+
+/* EUSCI A2 UART ISR - Echoes data back to PC host */
+void EUSCIA2_IRQHandler(void)
+{
+    uint32_t status = MAP_UART_getEnabledInterruptStatus(EUSCI_A2_BASE);
+
+    if(status & EUSCI_A_UART_RECEIVE_INTERRUPT_FLAG)
+    {
+        //MAP_UART_transmitData(EUSCI_A0_BASE, MAP_UART_receiveData(EUSCI_A0_BASE));
+        switch(count){
+        case 0:
+            receiveBuffer[0] = MAP_UART_receiveData(EUSCI_A2_BASE);
+            break;
+        case 1:
+            receiveBuffer[0] += MAP_UART_receiveData(EUSCI_A2_BASE) << 8;
+            break;
+        case 2:
+            receiveBuffer[1] = MAP_UART_receiveData(EUSCI_A2_BASE);
+            break;
+        case 3:
+            receiveBuffer[1] += MAP_UART_receiveData(EUSCI_A2_BASE) << 8;
+            receive_flag = 1;
+            break;
+        }
+
+        count++;
+        if(count > 3)
+            count = 0;
+
+        MAP_UART_clearInterruptFlag(EUSCI_A2_BASE, status);
+
+    }
+
 }
